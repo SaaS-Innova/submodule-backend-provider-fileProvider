@@ -9,11 +9,14 @@ export class FileObject {
   base64: string;
 
   @Field(() => String)
-  extensionName: string;
+  extensionName?: string;
 
   @Field(() => String)
   encoding: BufferEncoding;
 
   @Field(() => String)
   originalName?: string;
+
+  @Field(() => String)
+  path?: string;
 }

@@ -1,12 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ResponseMsgService } from 'src/commons';
-import { FilesServiceProvider } from './file-provider.service';
 import { BucketProviderModule } from '../bucketProvider/bucket-provider.module';
+import { FileProvider } from './file-provider.service';
 
 @Module({
   imports: [BucketProviderModule],
-  providers: [FilesServiceProvider, ResponseMsgService],
-  exports: [FilesServiceProvider],
+  providers: [FileProvider, ResponseMsgService],
+  exports: [FileProvider],
 })
 export class FileProviderModule {}
-

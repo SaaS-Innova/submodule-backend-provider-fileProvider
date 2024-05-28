@@ -1,132 +1,81 @@
 import { Injectable } from '@nestjs/common';
-import { Files } from './entities/files.entity';
 import * as fs from 'fs';
 import * as path from 'path';
 import { join, parse, resolve } from 'path';
-import axios from 'axios';
-import { CreateFilesInput } from './dto/create-files.input';
-import { filesRepository } from './repository/files.repository';
-import { UpdateFilesInput } from './dto/update-files.input';
-import { FileObject } from './dto/file.dto';
 import Jimp from 'jimp';
-import { AbstractService, ResponseMsgService } from '../../../commons';
+import { ResponseMsgService } from '../../../commons';
 import { BucketProvider } from '../bucketProvider/bucket-provider.service';
-import { RemoveDto } from '../../../commons/dto/remove.dto';
 import { config } from '../../../commons/config';
+import { FileObject } from './dto/file-object';
 
 @Injectable()
-export class FilesServiceProvider extends AbstractService {
+export class FileProvider {
   constructor(
     protected responseMsgService: ResponseMsgService,
     protected bucketProvider: BucketProvider,
-  ) {
-    super(filesRepository, responseMsgService);
-  }
-
-  /**
-   * Creates a new file record.
-   * @param {CreateFilesInput} data - Data for creating a new file.
-   * @param {string[]} [relations=null] - Relations to include in the query.
-   * @returns {Promise<Files>} The created file entity.
-   */
-  async create(
-    data: CreateFilesInput,
-    relations: string[] = null,
-  ): Promise<Files> {
-    const create = this.abstractCreate(data, relations);
-    return create;
-  }
-
-  /**
-   * Updates an existing file record.
-   * @param {number} id - The ID of the file to update.
-   * @param {UpdateFilesInput} data - Data for updating the file.
-   * @param {string[]} [relations=null] - Relations to include in the query.
-   * @returns {Promise<Files | boolean>} The updated file entity or false if update failed.
-   */
-  async update(
-    id: number,
-    data: UpdateFilesInput,
-    relations: string[] = null,
-  ): Promise<Files | boolean> {
-    const update = this.abstractUpdate(id, data, relations);
-    return update;
-  }
-
-  /**
-   * Removes a file record.
-   * @param {number} id - The ID of the file to remove.
-   * @returns {Promise<RemoveDto | boolean>} The remove result or false if removal failed.
-   */
-  async remove(id: number): Promise<RemoveDto | boolean> {
-    const remove = this.abstractRemove(id);
-    return remove;
-  }
+  ) {}
 
   /**
    * Saves a file to storage (local or S3).
    * @param {FileObject} fileObject - The file object containing file data.
-   * @param {string|null} originalFileName - The original name of the file.
-   * @returns {Promise<Files>} The saved file entity.
+   * @param {string|null} fileId - The Id of File.
    */
-  async saveFile(fileObject: FileObject, originalFileName: string | null = '') {
-    // originalName must be full fileName (e.g. 'image.jpg')
+  async uploadFile(fileObject: FileObject, fileId: number) {
     const { originalName, encoding, base64 } = fileObject;
-    const file: Files = await this.create({ path: '' });
-    const storagePath = path.join(config.storagePath, file.id.toString());
+    const storagePath = path.join(config.storagePath, fileId.toString());
+    const fileStoragePath = path.join(storagePath, originalName);
 
-    if (!originalFileName) {
-      originalFileName = originalName;
+    try {
+      if (config.STORAGE_TYPE === 'bucket') {
+        // Upload to S3 bucket
+        await this.bucketProvider.uploadImage(base64, originalName);
+      } else {
+        // Save to Disk storage
+        await fs.promises.mkdir(storagePath, {
+          recursive: true,
+        });
+
+        fs.writeFile(fileStoragePath, base64, encoding, (err) => {
+          if (err) {
+            fs.rmSync(storagePath, { recursive: true });
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error saving file:', error);
+      return error.message;
     }
-
-    if (config.bucketUpload) {
-      // Upload to S3 bucket
-      await this.bucketProvider.uploadImage(base64, originalName);
-    } else {
-      // Save to Disk storage
-      await fs.promises.mkdir(storagePath, {
-        recursive: true,
-      });
-      const fileStoragePath = path.join(storagePath, originalName);
-      fs.writeFile(fileStoragePath, base64, encoding, (err) => {
-        if (err) {
-          fs.rmSync(storagePath, { recursive: true });
-        }
-      });
-    }
-
-    await this.update(file.id, {
-      id: file.id,
-      path: path.join(file.id.toString(), originalName).replace(path.sep, '/'),
-      original_name: originalFileName,
-    });
-
-    return file;
   }
 
-  /**
-   * Retrieves a file object from a file ID.
-   * @param {number} fileId - The ID of the file to retrieve.
-   * @returns {Promise<FileObject>} The file object containing base64 data and metadata.
-   */
-  async getFileObjectFromFileId(fileId: number) {
+  async getFile(fileData) {
+    if (config.STORAGE_TYPE === 'bucket') {
+      const file = await this.bucketProvider.getImage(fileData.original_name);
+      const extensionName = parse(fileData.original_name).ext;
+      return { fileData: file.Body, ext: extensionName };
+    } else {
+      const filepath = this.getFilePathByFileId(fileData.id);
+      const bufferFile = fs.readFileSync(filepath);
+      const extensionName = parse(filepath).ext;
+      return { fileData: bufferFile, ext: extensionName };
+    }
+  }
+
+  async getFileDetails(fileData) {
     const fileObject = {
       base64: '',
       extensionName: '',
       encoding: '',
       originalName: '',
+      path: '',
     };
-    if (config.bucketUpload) {
-      const getFileData = await this.findOne({ where: { id: fileId } });
-      const file = await this.bucketProvider.getImage(
-        getFileData.original_name,
-      );
+    if (config.STORAGE_TYPE === 'bucket') {
+      const file = await this.bucketProvider.getImage(fileData.original_name);
       fileObject.base64 = file.Body.toString('base64');
-      fileObject.extensionName = parse(getFileData.original_name).ext;
+      fileObject.extensionName = parse(fileData.original_name).ext;
       fileObject.encoding = 'base64';
-      fileObject.originalName = getFileData.original_name;
+      fileObject.originalName = fileData.original_name;
     } else {
-      const filepath = this.getFilePathByFileId(fileId);
+      const filepath = this.getFilePathByFileId(fileData.id);
       const extensionName = parse(filepath).ext;
       const originalName = parse(filepath).base;
       const bufferFile = fs.readFileSync(filepath, { encoding: 'base64' });
@@ -134,6 +83,7 @@ export class FilesServiceProvider extends AbstractService {
       fileObject.extensionName = extensionName;
       fileObject.encoding = 'base64';
       fileObject.originalName = originalName;
+      fileObject.path = filepath;
     }
     return fileObject;
   }
@@ -156,26 +106,44 @@ export class FilesServiceProvider extends AbstractService {
     }
   }
 
-  /**
-   * Retrieves the file path for a given file ID.
-   * @param {number} fileId - The ID of the file.
-   * @returns {string|null} The file path or null if not found.
-   */
-  async getPathDetails(id: number) {
-    const getFileName = await this.findOne({ where: { id } });
+  async updateFile(fileObject: FileObject, fileData) {
+    const { originalName, encoding, base64 } = fileObject;
+    const storagePath = path.join(config.storagePath, fileData.id.toString());
+    const fileStoragePath = path.join(storagePath, originalName);
 
-    if (!getFileName) {
-      this.responseMsgService.addErrorMsg({
-        message: 'record does not exist',
-        type: 'error',
-        show: true,
-      });
-      return { path: '', fileName: '', ext: '' };
+    try {
+      if (config.STORAGE_TYPE === 'bucket') {
+        await this.bucketProvider.uploadImage(base64, originalName);
+        this.bucketProvider.deleteImage(fileData.original_name);
+      } else {
+        const files = fs.readdirSync(storagePath);
+        //Remove Old file from disk storage
+        for (const file of files) {
+          fs.unlinkSync(path.join(storagePath, file));
+        }
+
+        await fs.promises.mkdir(storagePath, {
+          recursive: true,
+        });
+        fs.writeFile(fileStoragePath, base64, encoding, (err) => {
+          if (err) {
+            fs.rmSync(storagePath, { recursive: true });
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error saving file:', error);
+      return error.message;
     }
-    const newFilePath = path.join(config.storagePath, getFileName.path);
-    const ext = parse(newFilePath).ext.substring(1);
+  }
 
-    return { path: newFilePath, fileName: getFileName.file, ext: ext };
+  async deleteFile(fileData) {
+    const storagePath = path.join(config.storagePath, fileData.id.toString());
+    if (config.STORAGE_TYPE === 'bucket') {
+      await this.bucketProvider.deleteImage(fileData.original_name);
+    } else {
+      fs.rmSync(storagePath, { recursive: true, force: true });
+    }
   }
 
   /**
@@ -213,190 +181,6 @@ export class FilesServiceProvider extends AbstractService {
       originalName: file.filename,
     };
     return fileObject;
-  }
-
-  /**
-   * Updates a file by ID.
-   * @param {number} fileId - The ID of the file to update.
-   * @param {FileObject} fileObject - The new file object data.
-   * @param {string|null} originalFileName - The original name of the file.
-   * @returns {Promise<Files | boolean>} The updated file entity or false if update failed.
-   */
-  async updateFileById(
-    fileId: number,
-    fileObject: FileObject,
-    originalFileName: string | null = '',
-  ) {
-    const getFileData = await this.findOne({ where: { id: fileId } });
-    const { originalName, encoding, base64 } = fileObject;
-    if (!originalFileName) {
-      originalFileName = originalName;
-    }
-    const storagePath = path.join(config.storagePath, fileId.toString());
-    const fileStoragePath = path.join(storagePath, originalName);
-
-    if (config.bucketUpload) {
-      await this.bucketProvider.uploadImage(base64, originalName);
-      this.bucketProvider.deleteImage(getFileData.original_name);
-    } else {
-      const files = fs.readdirSync(storagePath);
-      for (const file of files) {
-        fs.unlinkSync(path.join(storagePath, file));
-      }
-      await fs.promises.mkdir(storagePath, {
-        recursive: true,
-      });
-      fs.writeFile(fileStoragePath, base64, encoding, (err) => {
-        if (err) {
-          fs.rmSync(storagePath, { recursive: true });
-        }
-      });
-    }
-
-    const file = await this.update(fileId, {
-      id: fileId,
-      path: path.join(fileId.toString(), originalName).replace(path.sep, '/'),
-      original_name: originalFileName,
-    });
-    return file;
-  }
-
-  /**
-   * Updates a file by ID.
-   * @param {number} fileId - The ID of the file to update.
-   * @param {FileObject} fileObject - The new file object data.
-   * @param {string|null} originalFileName - The original name of the file.
-   * @returns {Promise<Files | boolean>} The updated file entity or false if update failed.
-   */
-  async getFileBase64FromUrl(imageUrl) {
-    try {
-      const response = await axios.get(imageUrl, {
-        responseType: 'arraybuffer',
-      });
-
-      const imageBase64 = Buffer.from(response.data, 'binary').toString(
-        'base64',
-      );
-
-      return imageBase64;
-    } catch (error) {
-      throw new Error(
-        `Failed to fetch image and convert to base64: ${error.message}`,
-      );
-    }
-  }
-
-  /**
-   * Retrieves the file size in kilobytes.
-   * @param {string} filePath - The path to the file.
-   * @returns {Promise<number>} The file size in kilobytes.
-   */
-  async getFileSize(filePath: string) {
-    try {
-      const fileInfo = await fs.promises.stat(filePath);
-      const fileSizeInBytes = fileInfo.size;
-      const fileSizeInKB = fileSizeInBytes / 1000;
-      return fileSizeInKB;
-    } catch (error) {
-      throw new Error('Failed to get file size from image');
-    }
-  }
-
-  /**
-   * Removes a file by ID.
-   * @param {number} fileId - The ID of the file to remove.
-   * @returns {Promise<RemoveDto | boolean>} The remove result or false if removal failed.
-   */
-  async removeFile(fileId: number) {
-    const storagePath = path.join(config.storagePath, fileId.toString());
-    const getFileData = await this.findOne({ where: { id: fileId } });
-    try {
-      if (config.bucketUpload) {
-        await this.bucketProvider.deleteImage(getFileData.original_name);
-      } else {
-        fs.rmSync(storagePath, { recursive: true, force: true });
-      }
-      const remove = await this.remove(fileId);
-      return remove;
-    } catch (e) {
-      this.responseMsgService.addErrorMsg({
-        message: e,
-        type: 'error',
-        show: true,
-      });
-      this.responseMsgService.isSuccess(false);
-      return false;
-    }
-  }
-
-  /**
-   * Removes a file by ID.
-   * @param {number} fileId - The ID of the file to remove.
-   * @returns {Promise<RemoveDto | boolean>} The remove result or false if removal failed.
-   */
-  async getFile(id: string) {
-    const getFileData = await this.findOne({ where: { id } });
-    if (!getFileData) {
-      this.responseMsgService.addErrorMsg({
-        message: 'record does not exist',
-        type: 'error',
-        show: true,
-      });
-      return false;
-    }
-    return await this.bucketProvider.getImage(getFileData.original_name);
-  }
-
-  /**
-   * Removes temporary files from the storage path.
-   */
-  async removeTempFiles() {
-    const tempPath = config.storagePath + '/temp';
-    fs.readdir(tempPath, (err, files) => {
-      if (err) {
-        console.error('removeTempFiles', err);
-        return;
-      }
-      files.forEach((file) => {
-        const data =
-          new Date().getTime() -
-          fs.statSync(tempPath + '/' + file).mtime.getTime();
-        if (data > 1000 * 60 * 5) {
-          fs.rmSync(tempPath + '/' + file);
-        }
-      });
-    });
-  }
-
-  /**
-   * Checks the image size and decreases its quality if it exceeds the specified file size.
-   * @param {Jimp} image - The image to process.
-   * @param {string} filePath - The path to the file.
-   * @param {number} fileSize - The maximum file size in kilobytes.
-   * @returns {Promise<string>} The new file path of the decreased quality image.
-   */
-  async checkImageSizeAndDecreaseImageQuality(
-    image: Jimp,
-    filePath: string,
-    fileSize: number,
-  ) {
-    try {
-      let sizeOfFile = await this.getFileSize(filePath);
-      let quality = 100;
-      let decreasedImage = image;
-      let newFilePath = filePath;
-      while (sizeOfFile > fileSize && quality > 0) {
-        decreasedImage = decreasedImage.quality(quality);
-        const newFile = await this.writeImageFile(decreasedImage, filePath);
-        const fileSize = await this.getFileSize(newFile.fileName);
-        sizeOfFile = fileSize;
-        newFilePath = newFile.fileName;
-        quality -= 2;
-      }
-      return newFilePath;
-    } catch (e) {
-      throw new Error('Failed to check image size and decrease image quality');
-    }
   }
 
   /**
@@ -460,26 +244,6 @@ export class FilesServiceProvider extends AbstractService {
   }
 
   /**
-   * Retrieves the MIME type from a base64 string.
-   * @param {string} data - The base64 string.
-   * @returns {string|null} The MIME type or null if not found.
-   */
-  getMimeTypeFromBase64 = (data) => {
-    const reg = /^data:([\w+\/]+);base64,([\s\S]+)/;
-    const match = data?.match(reg);
-    return match && match[1] ? match[1]?.split('/')[1] : null;
-  };
-
-  /**
-   * Resizes an image to 100x150 pixels.
-   * @param {Jimp} image - The image to resize.
-   * @returns {Jimp} The resized image.
-   */
-  resizeImageFile(image: Jimp) {
-    return image.resize(100, 150);
-  }
-
-  /**
    * Resizes an image to 100x150 pixels.
    * @param {Jimp} image - The image to resize.
    * @returns {Jimp} The resized image.
@@ -502,6 +266,85 @@ export class FilesServiceProvider extends AbstractService {
         return `audio/mp3`;
       default:
         return 'application/octet-stream';
+    }
+  }
+
+  /**
+   * Retrieves the MIME type from a base64 string.
+   * @param {string} data - The base64 string.
+   * @returns {string|null} The MIME type or null if not found.
+   */
+  getMimeTypeFromBase64 = (data) => {
+    const reg = /^data:([\w+\/]+);base64,([\s\S]+)/;
+    const match = data?.match(reg);
+    return match && match[1] ? match[1]?.split('/')[1] : null;
+  };
+
+  /**
+   * Removes temporary files from the storage path.
+   */
+  async removeTempFiles() {
+    const tempPath = config.storagePath + '/temp';
+    fs.readdir(tempPath, (err, files) => {
+      if (err) {
+        console.error('removeTempFiles', err);
+        return;
+      }
+      files.forEach((file) => {
+        const data =
+          new Date().getTime() -
+          fs.statSync(tempPath + '/' + file).mtime.getTime();
+        if (data > 1000 * 60 * 5) {
+          fs.rmSync(tempPath + '/' + file);
+        }
+      });
+    });
+  }
+
+  /**
+   * Retrieves the file size in kilobytes.
+   * @param {string} filePath - The path to the file.
+   * @returns {Promise<number>} The file size in kilobytes.
+   */
+  async getFileSize(filePath: string) {
+    try {
+      const fileInfo = await fs.promises.stat(filePath);
+      const fileSizeInBytes = fileInfo.size;
+      const fileSizeInKB = fileSizeInBytes / 1000;
+      return fileSizeInKB;
+    } catch (error) {
+      throw new Error('Failed to get file size from image');
+    }
+  }
+
+  /**
+   * Checks the image size and decreases its quality if it exceeds the specified file size.
+   * @param {Jimp} image - The image to process.
+   * @param {string} filePath - The path to the file.
+   * @param {number} fileSize - The maximum file size in kilobytes.
+   * @returns {Promise<string>} The new file path of the decreased quality image.
+   */
+  async checkImageSizeAndDecreaseImageQuality(
+    image: Jimp,
+    filePath: string,
+    fileSize: number,
+  ) {
+    try {
+      let sizeOfFile = await this.getFileSize(filePath);
+      let quality = 100;
+      let decreasedImage = image;
+      let newFilePath = filePath;
+      while (sizeOfFile > fileSize && quality > 0) {
+        decreasedImage = decreasedImage.quality(quality);
+        const newFile = await this.writeImageFile(decreasedImage, filePath);
+        const fileSize = await this.getFileSize(newFile.fileName);
+        sizeOfFile = fileSize;
+        newFilePath = newFile.fileName;
+        quality -= 2;
+      }
+      return newFilePath;
+    } catch (e) {
+      throw new Error('Failed to check image size and decrease image quality');
     }
   }
 
