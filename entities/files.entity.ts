@@ -6,9 +6,9 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Field, Int, ObjectType } from '@nestjs/graphql';
-import { ResponseObject } from '../../../commons';
-import { MailAttachments } from '../../../modules/mail-attachments/entities/mail-attachments.entity';
-import { Company } from '../../../modules/company/entities/company.entity';
+import { ResponseObject } from '../../../../commons';
+import { MailAttachments } from '../../../../modules/mail-attachments/entities/mail-attachments.entity';
+import { Company } from '../../../../modules/company/entities/company.entity';
 
 @Index('files_pkey', ['id'], { unique: true })
 @Entity('files', { schema: 'public' })

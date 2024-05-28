@@ -1,19 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import { AbstractService } from '../../commons/abstract.service';
 import { Files } from './entities/files.entity';
-import { ResponseMsgService } from '../../commons';
-import { RemoveDto } from '../../commons/dto/remove.dto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { join, parse, resolve } from 'path';
-import { config } from '../../commons/config';
 import axios from 'axios';
 import { CreateFilesInput } from './dto/create-files.input';
 import { filesRepository } from './repository/files.repository';
 import { UpdateFilesInput } from './dto/update-files.input';
 import { FileObject } from './dto/file.dto';
 import Jimp from 'jimp';
-import { BucketProvider } from '../../submodule/provider/bucketProvider/bucket-provider.service';
+import { AbstractService, ResponseMsgService } from '../../../commons';
+import { BucketProvider } from '../bucketProvider/bucket-provider.service';
+import { RemoveDto } from '../../../commons/dto/remove.dto';
+import { config } from '../../../commons/config';
 
 @Injectable()
 export class FilesServiceProvider extends AbstractService {
