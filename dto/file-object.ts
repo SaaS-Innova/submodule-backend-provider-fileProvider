@@ -20,3 +20,10 @@ export class FileObject {
   @Field(() => String)
   path?: string;
 }
+
+export interface Files {
+  id: number;
+  created: string | null;
+  path: string | null;
+  original_name: string | null;
+}
