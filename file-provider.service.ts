@@ -1,13 +1,13 @@
-import { Injectable } from "@nestjs/common";
-import * as fs from "fs";
-import * as path from "path";
-import { join, parse, resolve } from "path";
-import Jimp from "jimp";
-import { ResponseMsgService } from "../../../commons";
-import { BucketProvider } from "../bucket-provider/bucket-provider.service";
-import { config } from "../../../commons/config";
-import { FileObject, Files } from "./dto/file-object";
-import { FILE_UPLOAD_TYPE } from "src/commons/constant";
+import { BadRequestException, Injectable } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
+import { join, parse, resolve } from 'path';
+import Jimp from 'jimp';
+import { ResponseMsgService } from '../../../commons';
+import { BucketProvider } from '../bucket-provider/bucket-provider.service';
+import { config } from '../../../commons/config';
+import { FileObject, Files, UploadObject } from './dto/file-object';
+import { FILE_UPLOAD_TYPE } from 'src/commons/constant';
 
 @Injectable()
 export class FileProvider {
@@ -18,10 +18,10 @@ export class FileProvider {
 
   /**
    * Saves a file to storage (local or S3).
-   * @param {FileObject} fileObject - The file object containing file data.
+   * @param {UploadObject} fileObject - The file object containing file data.
    * @param {string|null} fileId - The Id of File.
    */
-  async uploadFiles(fileObject: FileObject, fileId: number) {
+  async uploadFiles(fileObject: UploadObject, fileId: number) {
     const { originalName, encoding, base64 } = fileObject; // originalName should be :  'filename.ext'
     const storagePath = path.join(config.DISK_STORAGE_PATH, fileId.toString());
     const fileStoragePath = path.join(storagePath, originalName);
@@ -44,8 +44,8 @@ export class FileProvider {
         });
       }
     } catch (error) {
-      console.error("Error saving file:", error);
-      return error.message;
+      console.error('Error saving file:', error);
+      throw new BadRequestException(error.message);
     }
   }
 
@@ -55,41 +55,53 @@ export class FileProvider {
    */
   async getFile(fileData: Files) {
     if (config.STORAGE_TYPE === FILE_UPLOAD_TYPE.BUCKET) {
-      const fileName = fileData.id + "/" + fileData.original_name;
+      const fileName = fileData.id + '/' + fileData.original_name;
       const file = await this.bucketProvider.getFile(fileName);
+      if (!file) {
+        return false;
+      }
       const extensionName = parse(fileData.original_name).ext;
-      return { fileData: file.Body, ext: extensionName };
+      return {
+        fileData: file.Body,
+        ext: extensionName,
+        originalName: fileData.original_name,
+      };
     } else {
       const filepath = this.getFilePathByFileId(fileData.id);
       const bufferFile = fs.readFileSync(filepath);
       const extensionName = parse(filepath).ext;
-      return { fileData: bufferFile, ext: extensionName };
+      return {
+        fileData: bufferFile,
+        ext: extensionName,
+        originalName: fileData.original_name,
+      };
     }
   }
 
+  //Data return in base64 format
   async getFileDetails(fileData) {
     const fileObject = {
-      base64: "",
-      extensionName: "",
-      encoding: "",
-      originalName: "",
-      path: "",
+      base64: '',
+      extensionName: '',
+      encoding: '',
+      originalName: '',
+      path: '',
     };
     if (config.STORAGE_TYPE === FILE_UPLOAD_TYPE.BUCKET) {
-      const fileName = fileData.id + "/" + fileData.original_name;
+      const fileName = fileData.id + '/' + fileData.original_name;
       const file = await this.bucketProvider.getFile(fileName);
-      fileObject.base64 = file.Body.toString("base64");
+      fileObject.base64 = file.Body.toString('base64');
       fileObject.extensionName = parse(fileData.original_name).ext;
-      fileObject.encoding = "base64";
+      fileObject.encoding = 'base64';
       fileObject.originalName = fileData.original_name;
     } else {
       const filepath = this.getFilePathByFileId(fileData.id);
       const extensionName = parse(filepath).ext;
       const originalName = parse(filepath).base;
-      const bufferFile = fs.readFileSync(filepath, { encoding: "base64" });
+      const bufferFile = fs.readFileSync(filepath, { encoding: 'base64' });
       fileObject.base64 = bufferFile.toString();
       fileObject.extensionName = extensionName;
-      fileObject.encoding = "base64";
+      fileObject.encoding = 'base64';
       fileObject.originalName = originalName;
       fileObject.path = filepath;
     }
@@ -103,28 +115,25 @@ export class FileProvider {
    */
   getFilePathByFileId(fileId: number) {
     try {
-      const filepath = resolve(config.DISK_STORAGE_PATH + "/" + fileId);
+      const filepath = resolve(config.DISK_STORAGE_PATH + '/' + fileId);
       const fileName = fs.readdirSync(filepath)[0];
       const finalPath = join(filepath, fileName);
 
       return finalPath;
     } catch (e) {
-      console.error("getFilePathByFileId", e);
+      console.error('getFilePathByFileId', e);
       return null;
     }
   }
 
-  async updateFile(fileObject: FileObject, fileData) {
+  async updateFile(fileObject: FileObject, fileId: number) {
     const { originalName, encoding, base64 } = fileObject;
-    const storagePath = path.join(
-      config.DISK_STORAGE_PATH,
-      fileData.id.toString()
-    );
+    const storagePath = path.join(config.DISK_STORAGE_PATH, fileId.toString());
     const fileStoragePath = path.join(storagePath, originalName);
 
     try {
       if (config.STORAGE_TYPE === FILE_UPLOAD_TYPE.BUCKET) {
-        const fileName = `${fileData.id}/${originalName}`;
+        const fileName = `${fileId}/${originalName}`;
         await this.bucketProvider.uploadFile(base64, fileName);
         this.bucketProvider.deleteFile(fileName);
       } else {
@@ -144,18 +153,18 @@ export class FileProvider {
         });
       }
     } catch (error) {
-      console.error("Error saving file:", error);
-      return error.message;
+      console.error('Error saving file:', error);
+      throw new BadRequestException(error.message);
     }
   }
 
-  async deleteFile(fileData) {
+  async deleteFile(fileData: Files) {
     const storagePath = path.join(
       config.DISK_STORAGE_PATH,
       fileData.id.toString()
     );
     if (config.STORAGE_TYPE === FILE_UPLOAD_TYPE.BUCKET) {
-      const fileName = fileData.id + "/" + fileData.original_name;
+      const fileName = fileData.id + '/' + fileData.original_name;
       await this.bucketProvider.deleteFile(fileName);
     } else {
       fs.rmSync(storagePath, { recursive: true, force: true });
@@ -169,11 +178,11 @@ export class FileProvider {
    * @param {string} [filename] - The filename.
    * @returns {Promise<FileObject>} The file object.
    */
-  async getFileObjectForBase64Image(
+  getFileObjectForBase64Image(
     base64String: string,
     encoding?: any,
     filename?: string
-  ) {
+  ): FileObject {
     const { base64, extensionName } = this.extractBase64img(base64String);
     const fileObject: FileObject = {
       base64: base64,
@@ -208,43 +217,51 @@ export class FileProvider {
     const reg = /^data:image\/([\w+]+);base64,([\s\S]+)/;
     const match = data?.match(reg);
     const baseType = {
-      jpeg: "jpg",
+      jpeg: 'jpg',
     };
-    baseType["svg+xml"] = "svg";
+    baseType['svg+xml'] = 'svg';
 
     const extensionName = Array.isArray(match)
       ? baseType[match[1]]
         ? baseType[match[1]]
         : match[1]
-      : "";
+      : '';
 
     return {
-      extensionName: "." + extensionName,
+      extensionName: '.' + extensionName,
       base64: Array.isArray(match) ? match[2] : data,
     };
   };
 
   /**
    * Extracts base64 data from a file path.
-   * @param {string} data - The file path.
+   * @param {string} path - The file path.
    * @returns {Object} The extracted base64 data and extension.
    */
   //use for extract format and base64 string from path
-  extractBase64FromPath = (data: string) => {
-    const extensionName = parse(data);
-    const file = fs.readFileSync(data, { encoding: "base64" });
-    return {
-      extensionName: extensionName.ext,
-      base64: file,
-    };
+  extractBase64FromPath = (path: string) => {
+    try {
+      if (!fs.existsSync(path)) {
+        throw new Error('File does not exist');
+      }
+      const { ext } = parse(path);
+      const file = fs.readFileSync(path, { encoding: 'base64' });
+      return {
+        extensionName: ext,
+        base64: file,
+      };
+    } catch (error) {
+      console.error('Error extracting base64 from path:', error.message);
+      return null;
+    }
   };
 
   /**
    * Extracts base64 data from a file path.
-   * @param {string} data - The file path.
-   * @returns {Object} The extracted base64 data and extension.
+   * @param {string} originalname - The file path.
+   * @returns {string} Return the random filename.
    */
-  getRandomFileName(originalname: string) {
+  getRandomFileName(originalname: string): string {
     const randomFileName = `${Date.now()}-${originalname}`;
     return randomFileName;
   }
@@ -254,34 +271,34 @@ export class FileProvider {
    * @param {Express.Multer.File} file - The file object.
    * @returns {string} The generated unique file name.
    */
-  generateUniqueFileName(file: Express.Multer.File) {
+  generateUniqueFileName(file: Express.Multer.File): string {
     const randomFileName = `${Date.now()}-${file.originalname}`;
     return randomFileName;
   }
 
   /**
    * Resizes an image to 100x150 pixels.
-   * @param {Jimp} image - The image to resize.
+   * @param {string} fileExtension - The file extension.
    * @returns {Jimp} The resized image.
    */
   getContentType(fileExtension: string): string {
     switch (fileExtension.toLowerCase()) {
-      case "xml":
-        return "application/xml";
-      case "png":
-      case "jpg":
-      case "jpeg":
-      case "gif":
+      case 'xml':
+        return 'application/xml';
+      case 'png':
+      case 'jpg':
+      case 'jpeg':
+      case 'gif':
         return `image/${fileExtension}`;
-      case "mp4":
-      case "avi":
-      case "mov":
+      case 'mp4':
+      case 'avi':
+      case 'mov':
         return `video/${fileExtension}`;
-      case "mp3":
-      case "mpga":
+      case 'mp3':
+      case 'mpga':
         return `audio/mp3`;
       default:
-        return "application/octet-stream";
+        return 'application/octet-stream';
     }
   }
 
@@ -290,28 +307,28 @@ export class FileProvider {
    * @param {string} data - The base64 string.
    * @returns {string|null} The MIME type or null if not found.
    */
-  getMimeTypeFromBase64 = (data) => {
+  getMimeTypeFromBase64 = (data: string): string | null => {
     const reg = /^data:([\w+\/]+);base64,([\s\S]+)/;
     const match = data?.match(reg);
-    return match && match[1] ? match[1]?.split("/")[1] : null;
+    return match && match[1] ? match[1]?.split('/')[1] : null;
   };
 
   /**
    * Removes temporary files from the storage path.
    */
   async removeTempFiles() {
-    const tempPath = config.DISK_STORAGE_PATH + "/temp";
+    const tempPath = config.DISK_STORAGE_PATH + '/temp';
     fs.readdir(tempPath, (err, files) => {
       if (err) {
-        console.error("removeTempFiles", err);
+        console.error('removeTempFiles', err);
         return;
       }
       files.forEach((file) => {
         const data =
           new Date().getTime() -
-          fs.statSync(tempPath + "/" + file).mtime.getTime();
+          fs.statSync(tempPath + '/' + file).mtime.getTime();
         if (data > 1000 * 60 * 5) {
-          fs.rmSync(tempPath + "/" + file);
+          fs.rmSync(tempPath + '/' + file);
         }
       });
     });
@@ -322,14 +339,14 @@ export class FileProvider {
    * @param {string} filePath - The path to the file.
    * @returns {Promise<number>} The file size in kilobytes.
    */
-  async getFileSize(filePath: string) {
+  async getFileSize(filePath: string): Promise<number> {
     try {
       const fileInfo = await fs.promises.stat(filePath);
       const fileSizeInBytes = fileInfo.size;
       const fileSizeInKB = fileSizeInBytes / 1000;
       return fileSizeInKB;
     } catch (error) {
-      throw new Error("Failed to get file size from image");
+      throw new Error('Failed to get file size from image');
     }
   }
 
@@ -344,7 +361,7 @@ export class FileProvider {
     image: Jimp,
     filePath: string,
     fileSize: number
-  ) {
+  ): Promise<string> {
     try {
       let sizeOfFile = await this.getFileSize(filePath);
       let quality = 100;
@@ -360,18 +377,18 @@ export class FileProvider {
       }
       return newFilePath;
     } catch (e) {
-      throw new Error("Failed to check image size and decrease image quality");
+      throw new Error('Failed to check image size and decrease image quality');
     }
   }
 
   /**
-   * Writes an image to a file.
+   * Writes an image file to the specified path.
    * @param {Jimp} image - The image to write.
    * @param {string} filePath - The path to save the image.
-   * @returns {Promise<Object>} The written image and its file path.
+   * @returns {Promise<any>} The written image and file name.
    */
   async writeImageFile(image: Jimp, filePath: string) {
-    const fileName = `${filePath.split(".")[0]}.jpg`;
+    const fileName = `${filePath.split('.')[0]}.jpg`;
     return { image: await image.writeAsync(fileName), fileName: fileName };
   }
 
@@ -382,19 +399,19 @@ export class FileProvider {
    * @param {string} [filename] - The filename.
    * @returns {Promise<FileObject>} The file object.
    */
-  async getFileObjectFromPdf(
+  getFileObjectFromPdf(
     base64String: string,
     encoding?: any,
     filename?: string
-  ) {
+  ): FileObject {
     const reg = /^data:application\/([\w+]+);base64,([\s\S]+)/;
     const match = base64String?.match(reg);
 
-    const extensionName = Array.isArray(match) ? match[1] : "";
+    const extensionName = Array.isArray(match) ? match[1] : '';
     const fileObject: FileObject = {
       base64: base64String,
       encoding: encoding,
-      originalName: filename + "." + extensionName,
+      originalName: filename + '.' + extensionName,
     };
     return fileObject;
   }

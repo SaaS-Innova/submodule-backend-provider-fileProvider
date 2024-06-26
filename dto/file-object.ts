@@ -1,10 +1,7 @@
-import { Field, Int, ObjectType } from '@nestjs/graphql';
+import { Field, ObjectType, Int } from '@nestjs/graphql';
 
 @ObjectType()
-export class FileObject {
-  @Field(() => Int)
-  fileId?: number;
-
+export class UploadObject {
   @Field(() => String)
   base64: string;
 
@@ -16,6 +13,12 @@ export class FileObject {
 
   @Field(() => String)
   originalName?: string;
+}
+
+@ObjectType()
+export class FileObject extends UploadObject {
+  @Field(() => Int)
+  fileId?: number;
 
   @Field(() => String)
   path?: string;
@@ -23,7 +26,7 @@ export class FileObject {
 
 export interface Files {
   id: number;
-  created: string | null;
-  path: string | null;
+  created?: string | null;
+  path?: string | null;
   original_name: string | null;
 }
