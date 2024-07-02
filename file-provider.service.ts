@@ -30,7 +30,10 @@ export class FileProvider {
       if (config.STORAGE_TYPE === FILE_UPLOAD_TYPE.BUCKET) {
         // Upload to S3 bucket
         const fileName = `${fileId}/${originalName}`;
-        await this.bucketProvider.uploadFile(base64, fileName);
+        const contentType = this.getContentType(
+          parse(originalName).ext.substring(1)
+        );
+        await this.bucketProvider.uploadFile(base64, fileName, contentType);
       } else {
         // Save to Disk storage
         await fs.promises.mkdir(storagePath, {
@@ -53,33 +56,18 @@ export class FileProvider {
    *Get a file from disk or bucket.
    * @param {fileData} fileData - The file object containing file data.
    */
-  async getFile(fileData: Files) {
+  async getFile(fileData: Files, hostURL: string) {
     if (config.STORAGE_TYPE === FILE_UPLOAD_TYPE.BUCKET) {
-      const fileName = fileData.id + '/' + fileData.original_name;
-      const file = await this.bucketProvider.getFile(fileName);
-      if (!file) {
-        return false;
-      }
-      const extensionName = parse(fileData.original_name).ext;
-      return {
-        fileData: file.Body,
-        ext: extensionName,
-        originalName: fileData.original_name,
-      };
+      const path = fileData.id + '/' + fileData.original_name;
+      const url = await this.bucketProvider.getPresignedUrlOfFile(path);
+      return url;
     } else {
-      const filepath = this.getFilePathByFileId(fileData.id);
-      const bufferFile = fs.readFileSync(filepath);
-      const extensionName = parse(filepath).ext;
-      return {
-        fileData: bufferFile,
-        ext: extensionName,
-        originalName: fileData.original_name,
-      };
+      return hostURL + '/file/' + fileData.id;
     }
   }
 
   //Data return in base64 format
-  async getFileDetails(fileData) {
+  async getFileDetails(fileData: Files) {
     const fileObject = {
       base64: '',
       extensionName: '',
@@ -90,7 +78,7 @@ export class FileProvider {
     if (config.STORAGE_TYPE === FILE_UPLOAD_TYPE.BUCKET) {
       const fileName = fileData.id + '/' + fileData.original_name;
       const file = await this.bucketProvider.getFile(fileName);
-      fileObject.base64 = file.Body.toString('base64');
+      fileObject.base64 = file;
       fileObject.extensionName = parse(fileData.original_name).ext;
       fileObject.encoding = 'base64';
       fileObject.originalName = fileData.original_name;
@@ -113,7 +101,7 @@ export class FileProvider {
    * @param {number} fileId - The ID of the file.
    * @returns {string|null} The file path or null if not found.
    */
-  getFilePathByFileId(fileId: number) {
+  getFilePathByFileId(fileId: number): string | null {
     try {
       const filepath = resolve(config.DISK_STORAGE_PATH + '/' + fileId);
       const fileName = fs.readdirSync(filepath)[0];
@@ -128,15 +116,20 @@ export class FileProvider {
 
   async updateFile(fileObject: FileObject, fileId: number) {
     const { originalName, encoding, base64 } = fileObject;
-    const storagePath = path.join(config.DISK_STORAGE_PATH, fileId.toString());
-    const fileStoragePath = path.join(storagePath, originalName);
 
     try {
       if (config.STORAGE_TYPE === FILE_UPLOAD_TYPE.BUCKET) {
         const fileName = `${fileId}/${originalName}`;
-        await this.bucketProvider.uploadFile(base64, fileName);
-        this.bucketProvider.deleteFile(fileName);
+        const contentType = this.getContentType(
+          parse(originalName).ext.substring(1)
+        );
+        await this.bucketProvider.uploadFile(base64, fileName, contentType);
       } else {
+        const storagePath = path.join(
+          config.DISK_STORAGE_PATH,
+          fileId.toString()
+        );
+        const fileStoragePath = path.join(storagePath, originalName);
         const files = fs.readdirSync(storagePath);
         //Remove Old file from disk storage
         for (const file of files) {
@@ -198,7 +191,10 @@ export class FileProvider {
    * @param {string} [encoding] - The encoding type.
    * @returns {Promise<FileObject>} The file object.
    */
-  async getFileObjectForFileBufferData(file: any, encoding?: any) {
+  async getFileObjectForFileBufferData(
+    file: any,
+    encoding?: any
+  ): Promise<FileObject> {
     const { base64 } = this.extractBase64FromPath(file.path);
     const fileObject: FileObject = {
       base64: base64,
@@ -297,6 +293,8 @@ export class FileProvider {
       case 'mp3':
       case 'mpga':
         return `audio/mp3`;
+      case 'pdf':
+        return 'application/pdf';
       default:
         return 'application/octet-stream';
     }

@@ -28,5 +28,5 @@ export interface Files {
   id: number;
   created?: string | null;
   path?: string | null;
-  original_name: string | null;
+  original_name: string;
 }
