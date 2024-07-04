@@ -407,8 +407,10 @@ export class FileProvider {
     // Calculate expiration time based on the number of files, with a maximum of 60 seconds
     const expireInTime = fileData.length * 5 <= 60 ? fileData.length * 5 : 60;
     for (const file of fileData) {
-      const url: string = await this.getFile(file, hostURL, expireInTime);
-      urls.push({ id: file.id, url: url });
+      const url = await this.getFile(file, hostURL, expireInTime);
+      if (url) {
+        urls.push({ id: file.id, url: url });
+      }
     }
     return urls;
   }
