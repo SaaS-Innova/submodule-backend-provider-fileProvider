@@ -6,7 +6,7 @@ import Jimp from 'jimp';
 import { ResponseMsgService } from '../../../commons';
 import { BucketProvider } from '../bucket-provider/bucket-provider.service';
 import { config } from '../../../commons/config';
-import { FileObject, Files, UploadObject } from './dto/file-object';
+import { FileObject, FileUrl, Files, UploadObject } from './dto/file-object';
 import { FILE_UPLOAD_TYPE } from 'src/commons/constant';
 
 @Injectable()
@@ -56,10 +56,13 @@ export class FileProvider {
    *Get a file from disk or bucket.
    * @param {fileData} fileData - The file object containing file data.
    */
-  async getFile(fileData: Files, hostURL: string) {
+  async getFile(fileData: Files, hostURL: string, expiresIn?: number) {
     if (config.STORAGE_TYPE === FILE_UPLOAD_TYPE.BUCKET) {
       const path = fileData.id + '/' + fileData.original_name;
-      const url = await this.bucketProvider.getPresignedUrlOfFile(path);
+      const url = await this.bucketProvider.getPresignedUrlOfFile(
+        path,
+        expiresIn
+      );
       return url;
     } else {
       return hostURL + '/file/' + fileData.id;
@@ -84,6 +87,9 @@ export class FileProvider {
       fileObject.originalName = fileData.original_name;
     } else {
       const filepath = this.getFilePathByFileId(fileData.id);
+      if (!filepath) {
+        return null;
+      }
       const extensionName = parse(filepath).ext;
       const originalName = parse(filepath).base;
       const bufferFile = fs.readFileSync(filepath, { encoding: 'base64' });
@@ -194,10 +200,13 @@ export class FileProvider {
   async getFileObjectForFileBufferData(
     file: any,
     encoding?: any
-  ): Promise<FileObject> {
-    const { base64 } = this.extractBase64FromPath(file.path);
+  ): Promise<FileObject | null> {
+    const data = this.extractBase64FromPath(file.path);
+    if (!data) {
+      return null;
+    }
     const fileObject: FileObject = {
-      base64: base64,
+      base64: data.base64,
       encoding: encoding,
       originalName: file.filename,
     };
@@ -385,32 +394,22 @@ export class FileProvider {
    * @param {string} filePath - The path to save the image.
    * @returns {Promise<any>} The written image and file name.
    */
-  async writeImageFile(image: Jimp, filePath: string) {
+  async writeImageFile(image: Jimp, filePath: string): Promise<any> {
     const fileName = `${filePath.split('.')[0]}.jpg`;
     return { image: await image.writeAsync(fileName), fileName: fileName };
   }
 
-  /**
-   * Extracts a file object from a base64 pdf string.
-   * @param {string} base64String - The base64 string of the pdf.
-   * @param {string} [encoding] - The encoding type.
-   * @param {string} [filename] - The filename.
-   * @returns {Promise<FileObject>} The file object.
-   */
-  getFileObjectFromPdf(
-    base64String: string,
-    encoding?: any,
-    filename?: string
-  ): FileObject {
-    const reg = /^data:application\/([\w+]+);base64,([\s\S]+)/;
-    const match = base64String?.match(reg);
-
-    const extensionName = Array.isArray(match) ? match[1] : '';
-    const fileObject: FileObject = {
-      base64: base64String,
-      encoding: encoding,
-      originalName: filename + '.' + extensionName,
-    };
-    return fileObject;
+  async getMultipleFiles(
+    fileData: Files[],
+    hostURL: string
+  ): Promise<FileUrl[]> {
+    const urls: FileUrl[] = [];
+    // Calculate expiration time based on the number of files, with a maximum of 60 seconds
+    const expireInTime = fileData.length * 5 <= 60 ? fileData.length * 5 : 60;
+    for (const file of fileData) {
+      const url: string = await this.getFile(file, hostURL, expireInTime);
+      urls.push({ id: file.id, url: url });
+    }
+    return urls;
   }
 }

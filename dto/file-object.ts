@@ -30,3 +30,8 @@ export interface Files {
   path?: string | null;
   original_name: string;
 }
+
+export interface FileUrl {
+  id: number;
+  url: string;
+}
