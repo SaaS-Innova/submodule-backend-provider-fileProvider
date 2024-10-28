@@ -18,8 +18,12 @@ export class FileProvider {
 
   /**
    * Saves a file to storage (local or S3).
+   *
+   * This function stores a file either locally or in an S3 bucket, depending on configuration.
+   * If S3 is used, it utilizes base64 encoding; if local, it creates a directory for storage.
+   *
    * @param {UploadObject} fileObject - The file object containing file data.
-   * @param {string|null} fileId - The Id of File.
+   * @param {string|null} fileId - The ID of the file.
    */
   async uploadFiles(fileObject: UploadObject, fileId: number) {
     const { originalName, encoding, base64 } = fileObject; // originalName should be :  'filename.ext'
@@ -53,8 +57,14 @@ export class FileProvider {
   }
 
   /**
-   *Get a file from disk or bucket.
-   * @param {fileData} fileData - The file object containing file data.
+   * Retrieves a file from disk or S3.
+   *
+   * This function fetches a file from either local storage or an S3 bucket.
+   * It returns the URL of the file or false if the retrieval fails.
+   *
+   * @param {Files} fileData - The file object containing file data.
+   * @param {string} hostURL - The URL of the host server.
+   * @param {number} [expiresIn] - URL expiration time for S3 links.
    */
   async getFile(fileData: Files, hostURL: string, expiresIn?: number) {
     if (config.STORAGE_TYPE === FILE_UPLOAD_TYPE.BUCKET) {
@@ -69,7 +79,14 @@ export class FileProvider {
     }
   }
 
-  //Data return in base64 format
+  /**
+   * Retrieves file details in base64 format.
+   *
+   * Gets the file’s base64 string, extension, encoding, and name from either local storage or S3.
+   *
+   * @param {Files} fileData - The file object containing file data.
+   * @returns {Object} The file details including base64, extension, encoding, and original name.
+   */
   async getFileDetails(fileData: Files) {
     const fileObject = {
       base64: "",
@@ -104,6 +121,9 @@ export class FileProvider {
 
   /**
    * Retrieves the file path for a given file ID.
+   *
+   * Searches the storage directory for a file using its ID. Returns the full file path or null if not found.
+   *
    * @param {number} fileId - The ID of the file.
    * @returns {string|null} The file path or null if not found.
    */
@@ -120,6 +140,14 @@ export class FileProvider {
     }
   }
 
+  /**
+   * Updates an existing file in storage (local or S3).
+   *
+   * Replaces an existing file with a new file in local storage or in the S3 bucket.
+   *
+   * @param {FileObject} fileObject - The file object containing updated file data.
+   * @param {number} fileId - The ID of the file to update.
+   */
   async updateFile(fileObject: FileObject, fileId: number) {
     const { originalName, encoding, base64 } = fileObject;
 
@@ -157,6 +185,13 @@ export class FileProvider {
     }
   }
 
+  /**
+   * Deletes a file from local storage or S3.
+   *
+   * This function removes a file from either local storage or S3, depending on the configuration.
+   *
+   * @param {Files} fileData - The file object containing file data.
+   */
   async deleteFile(fileData: Files) {
     const storagePath = path.join(
       config.DISK_STORAGE_PATH,
@@ -172,6 +207,9 @@ export class FileProvider {
 
   /**
    * Extracts a file object from a base64 image string.
+   *
+   * Parses a base64 image string and returns it as a file object, with optional encoding and filename.
+   *
    * @param {string} base64String - The base64 string of the image.
    * @param {string} [encoding] - The encoding type.
    * @param {string} [filename] - The filename.
@@ -193,6 +231,9 @@ export class FileProvider {
 
   /**
    * Extracts a file object from a file buffer.
+   *
+   * Converts a file buffer to a base64 file object.
+   *
    * @param {any} file - The file buffer data.
    * @param {string} [encoding] - The encoding type.
    * @returns {Promise<FileObject>} The file object.
@@ -215,6 +256,9 @@ export class FileProvider {
 
   /**
    * Extracts the base64 image data and its extension.
+   *
+   * Parses a base64 image string and retrieves the base64 data and file extension.
+   *
    * @param {string} data - The base64 image string.
    * @returns {Object} The extracted base64 data and extension.
    */
@@ -240,10 +284,12 @@ export class FileProvider {
 
   /**
    * Extracts base64 data from a file path.
+   *
+   * Retrieves base64-encoded data and extension from a file at a given path.
+   *
    * @param {string} path - The file path.
    * @returns {Object} The extracted base64 data and extension.
    */
-  //use for extract format and base64 string from path
   extractBase64FromPath = (path: string) => {
     try {
       if (!fs.existsSync(path)) {
@@ -262,9 +308,10 @@ export class FileProvider {
   };
 
   /**
-   * Extracts base64 data from a file path.
+   * Generates a random file name based on the original name.
+   *
    * @param {string} originalname - The file path.
-   * @returns {string} Return the random filename.
+   * @returns {string} A random filename based on the timestamp.
    */
   getRandomFileName(originalname: string): string {
     const randomFileName = `${Date.now()}-${originalname}`;
@@ -272,7 +319,8 @@ export class FileProvider {
   }
 
   /**
-   * Generates a unique file name based on the original name.
+   * Generates a unique file name for storage.
+   *
    * @param {Express.Multer.File} file - The file object.
    * @returns {string} The generated unique file name.
    */
@@ -282,9 +330,10 @@ export class FileProvider {
   }
 
   /**
-   * Resizes an image to 100x150 pixels.
+   * Determines the MIME content type based on file extension.
+   *
    * @param {string} fileExtension - The file extension.
-   * @returns {Jimp} The resized image.
+   * @returns {string} The determined content type.
    */
   getContentType(fileExtension: string): string {
     switch (fileExtension.toLowerCase()) {
@@ -311,6 +360,7 @@ export class FileProvider {
 
   /**
    * Retrieves the MIME type from a base64 string.
+   *
    * @param {string} data - The base64 string.
    * @returns {string|null} The MIME type or null if not found.
    */
@@ -322,6 +372,8 @@ export class FileProvider {
 
   /**
    * Removes temporary files from the storage path.
+   *
+   * Deletes files older than five minutes from the temporary directory.
    */
   async removeTempFiles() {
     const tempPath = config.DISK_STORAGE_PATH + "/temp";
@@ -343,6 +395,9 @@ export class FileProvider {
 
   /**
    * Retrieves the file size in kilobytes.
+   *
+   * Obtains the file size in kilobytes for a specified file.
+   *
    * @param {string} filePath - The path to the file.
    * @returns {Promise<number>} The file size in kilobytes.
    */
@@ -358,11 +413,14 @@ export class FileProvider {
   }
 
   /**
-   * Checks the image size and decreases its quality if it exceeds the specified file size.
+   * Checks and adjusts the quality of an image if it exceeds a specified size.
+   *
+   * Compresses an image’s quality in 2% increments until it meets a target size in kilobytes.
+   *
    * @param {Jimp} image - The image to process.
    * @param {string} filePath - The path to the file.
    * @param {number} fileSize - The maximum file size in kilobytes.
-   * @returns {Promise<string>} The new file path of the decreased quality image.
+   * @returns {Promise<string>} The new file path of the compressed image.
    */
   async checkImageSizeAndDecreaseImageQuality(
     image: Jimp,
@@ -390,6 +448,9 @@ export class FileProvider {
 
   /**
    * Writes an image file to the specified path.
+   *
+   * Saves an image to a path on disk and returns the saved file’s details.
+   *
    * @param {Jimp} image - The image to write.
    * @param {string} filePath - The path to save the image.
    * @returns {Promise<any>} The written image and file name.
@@ -399,6 +460,15 @@ export class FileProvider {
     return { image: await image.writeAsync(fileName), fileName: fileName };
   }
 
+  /**
+   * Retrieves multiple file URLs.
+   *
+   * Generates presigned URLs for multiple files with an expiration based on file count.
+   *
+   * @param {Files[]} fileData - Array of file data objects.
+   * @param {string} hostURL - The host URL for local storage files.
+   * @returns {Promise<FileUrl[]>} Array of file URLs with IDs.
+   */
   async getMultipleFiles(
     fileData: Files[],
     hostURL: string
