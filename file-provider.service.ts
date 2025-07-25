@@ -2,7 +2,7 @@ import { BadRequestException, Injectable } from "@nestjs/common";
 import * as fs from "fs";
 import * as path from "path";
 import { join, parse, resolve } from "path";
-import Jimp from "jimp";
+import { JimpInstance } from "jimp";
 import { ResponseMsgService } from "../../../commons";
 import { BucketProvider } from "../bucket-provider/bucket-provider.service";
 import { config } from "../../../commons/config";
@@ -423,7 +423,7 @@ export class FileProvider {
    * @returns {Promise<string>} The new file path of the compressed image.
    */
   async checkImageSizeAndDecreaseImageQuality(
-    image: Jimp,
+    image: JimpInstance,
     filePath: string,
     fileSize: number
   ): Promise<string> {
@@ -433,8 +433,11 @@ export class FileProvider {
       let decreasedImage = image;
       let newFilePath = filePath;
       while (sizeOfFile > fileSize && quality > 0) {
-        decreasedImage = decreasedImage.quality(quality);
-        const newFile = await this.writeImageFile(decreasedImage, filePath);
+        const newFile = await this.writeImageFile(
+          decreasedImage,
+          filePath,
+          quality
+        );
         const fileSize = await this.getFileSize(newFile.fileName);
         sizeOfFile = fileSize;
         newFilePath = newFile.fileName;
@@ -455,9 +458,15 @@ export class FileProvider {
    * @param {string} filePath - The path to save the image.
    * @returns {Promise<any>} The written image and file name.
    */
-  async writeImageFile(image: Jimp, filePath: string): Promise<any> {
+  async writeImageFile(
+    image: JimpInstance,
+    filePath: string,
+    quality: number = 100
+  ): Promise<any> {
     const fileName = `${filePath.split(".")[0]}.jpg`;
-    return { image: await image.writeAsync(fileName), fileName: fileName };
+    const buffer = await image.getBuffer("image/jpeg", { quality });
+    await fs.promises.writeFile(fileName, buffer);
+    return { image, fileName };
   }
 
   /**
